@@ -109,6 +109,53 @@ def flash_attention(
             causal=causal,
             deterministic=deterministic)[0].unflatten(0, (b, lq))
     else:
+        # Windows fallback: use PyTorch SDPA when flash_attn is unavailable.
+        # q/k/v are flattened to [N, H, C] here (N == b*lq, b*lk guaranteed by caller).
+        if not FLASH_ATTN_2_AVAILABLE and not FLASH_ATTN_3_AVAILABLE:
+            warnings.warn(
+                'Flash attention not available, falling back to scaled_dot_product_attention. '
+                'Padding mask is disabled; may impact performance.')
+            if b == 1:
+                # Single sample: no mask needed
+                q_sdpa = q.transpose(0, 1).unsqueeze(0)  # [1, H, N, C]
+                k_sdpa = k.transpose(0, 1).unsqueeze(0)
+                v_sdpa = v.transpose(0, 1).unsqueeze(0)
+                out = torch.nn.functional.scaled_dot_product_attention(
+                    q_sdpa,
+                    k_sdpa,
+                    v_sdpa,
+                    attn_mask=None,
+                    is_causal=causal,
+                    dropout_p=dropout_p)
+                return out.squeeze(0).transpose(0, 1).unflatten(
+                    0, (b, lq)).type(out_dtype)
+            else:
+                # Multi-sample varlen: build block-diagonal mask so samples
+                # don't attend across each other (Wan guarantees N == b*lq/lk).
+                q_l = q_lens if q_lens is not None else torch.tensor(
+                    [lq] * b, dtype=torch.int32, device=q.device)
+                k_l = k_lens if k_lens is not None else torch.tensor(
+                    [lk] * b, dtype=torch.int32, device=k.device)
+                mask = torch.zeros(
+                    b * lq, b * lk, device=q.device, dtype=torch.bool)
+                qs = ks = 0
+                for i in range(b):
+                    mask[qs:qs + int(q_l[i]), ks:ks + int(k_l[i])] = True
+                    qs += int(q_l[i])
+                    ks += int(k_l[i])
+                attn_mask = torch.where(mask, 0.0, float('-inf')).to(dtype)
+                q_sdpa = q.transpose(0, 1).unsqueeze(0)
+                k_sdpa = k.transpose(0, 1).unsqueeze(0)
+                v_sdpa = v.transpose(0, 1).unsqueeze(0)
+                out = torch.nn.functional.scaled_dot_product_attention(
+                    q_sdpa,
+                    k_sdpa,
+                    v_sdpa,
+                    attn_mask=attn_mask,
+                    is_causal=False,
+                    dropout_p=dropout_p)
+                return out.squeeze(0).transpose(0, 1).unflatten(
+                    0, (b, lq)).type(out_dtype)
         assert FLASH_ATTN_2_AVAILABLE
         x = flash_attn.flash_attn_varlen_func(
             q=q,

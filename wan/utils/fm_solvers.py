@@ -251,6 +251,14 @@ class FlowDPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
             sigmas = np.linspace(self.sigma_max, self.sigma_min,
                                  num_inference_steps +
                                  1).copy()[:-1]  # pyright: ignore
+        else:
+            # ``sigmas`` is part of the public API and is documented as a
+            # list.  Convert it before applying the NumPy-based flow shift so
+            # Python lists (and other array-like inputs) follow the same path
+            # as the internally generated schedule.
+            sigmas = np.asarray(sigmas, dtype=np.float32)
+            if sigmas.ndim != 1 or sigmas.size == 0:
+                raise ValueError("`sigmas` must be a non-empty one-dimensional sequence")
 
         if self.config.use_dynamic_shifting:
             sigmas = self.time_shift(mu, 1.0, sigmas)  # pyright: ignore
@@ -261,8 +269,12 @@ class FlowDPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
                                        (shift - 1) * sigmas)  # pyright: ignore
 
         if self.config.final_sigmas_type == "sigma_min":
-            sigma_last = ((1 - self.alphas_cumprod[0]) /
-                          self.alphas_cumprod[0])**0.5
+            # Flow matching uses x_t=(1-sigma_t)x_0+sigma_t*epsilon, so its
+            # terminal noise level is the scheduler's flow ``sigma_min``.
+            # The old DDPM expression referenced ``alphas_cumprod``, which is
+            # not defined by this scheduler and made this documented option
+            # unusable.
+            sigma_last = self.sigma_min
         elif self.config.final_sigmas_type == "zero":
             sigma_last = 0
         else:
@@ -460,6 +472,21 @@ class FlowDPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
             self.step_index]  # pyright: ignore
         alpha_t, sigma_t = self._sigma_to_alpha_sigma_t(sigma_t)
         alpha_s, sigma_s = self._sigma_to_alpha_sigma_t(sigma_s)
+
+        # In the noise-prediction variants, evaluating exp(lambda_t) at the
+        # flow endpoint sigma_t=0 creates an inf * 0 expression.  Use its
+        # closed-form limit instead; this keeps the deprecated variants
+        # numerically valid while preserving the exact flow solution.
+        if sigma_t.item() == 0 and self.config.algorithm_type in {
+                "dpmsolver", "sde-dpmsolver"
+        }:
+            endpoint_coeff = alpha_t * sigma_s / alpha_s
+            x_t = (alpha_t / alpha_s) * sample - endpoint_coeff * model_output
+            if self.config.algorithm_type == "sde-dpmsolver":
+                assert noise is not None
+                x_t = x_t - endpoint_coeff * model_output + endpoint_coeff * noise
+            return x_t  # pyright: ignore
+
         lambda_t = torch.log(alpha_t) - torch.log(sigma_t)
         lambda_s = torch.log(alpha_s) - torch.log(sigma_s)
 
@@ -744,11 +771,18 @@ class FlowDPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
         if self.step_index is None:
             self._init_step_index(timestep)
 
+        # A flow schedule can legitimately terminate at sigma=0.  At that
+        # boundary lambda(t) is infinite, so the multistep divided
+        # differences are undefined; use the first-order update just as we
+        # do for an explicitly zero terminal sigma.
+        terminal_sigma_is_zero = self.sigmas[self.step_index + 1].item() == 0
+
         # Improve numerical stability for small number of steps
         lower_order_final = (self.step_index == len(self.timesteps) - 1) and (
             self.config.euler_at_final or
             (self.config.lower_order_final and len(self.timesteps) < 15) or
-            self.config.final_sigmas_type == "zero")
+            self.config.final_sigmas_type == "zero" or
+            terminal_sigma_is_zero)
         lower_order_second = ((self.step_index == len(self.timesteps) - 2) and
                               self.config.lower_order_final and
                               len(self.timesteps) < 15)

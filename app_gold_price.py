@@ -3,7 +3,7 @@ Gold Price API Flask Application
 Integration example for serving live gold prices on your website.
 """
 
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template_string, request
 from flask_cors import CORS
 from wan.gold_api import GoldPriceAPI
 import logging
@@ -18,22 +18,34 @@ logger = logging.getLogger(__name__)
 @app.route("/api/gold-price", methods=["GET"])
 def get_gold_price():
     """
-    GET /api/gold-price
+    GET /api/gold-price?premium=2.14
     Returns current gold price in Omani Rial (OMR)
     
-    Response:
-    {
-        "currency": "OMR",
-        "price_per_gram": 1.234,
-        "price_per_ounce": 38.45,
-        "timestamp": "2024-01-15T10:30:45.123456",
-        "usd_to_omr_rate": 0.385,
-        "source": "metals.live + exchangerate-api",
-        "status": "success"
-    }
+    Query Parameters:
+    - premium (optional): Apply retail/local premium multiplier. Default: 2.14 (Oman retail)
+    
+    Response includes per_gram and per_oz prices for all purities (24K, 22K, 21K, 18K)
     """
     try:
-        price_data = GoldPriceAPI.get_gold_price_oman()
+        # Get optional premium parameter from query string
+        premium_str = request.args.get("premium")
+        premium = None
+        
+        if premium_str:
+            try:
+                premium = float(premium_str)
+                if premium <= 0:
+                    return jsonify({
+                        "error": "Premium multiplier must be > 0",
+                        "status": "failed"
+                    }), 400
+            except ValueError:
+                return jsonify({
+                    "error": f"Invalid premium value: {premium_str}",
+                    "status": "failed"
+                }), 400
+        
+        price_data = GoldPriceAPI.get_gold_price_oman(premium_multiplier=premium)
         logger.info(f"Gold price fetched: {price_data}")
         
         status_code = 200 if price_data.get("status") == "success" else 503

@@ -2,19 +2,26 @@
 Gold Price API - Oman Market Edition
 Fetches live gold prices with multi-purity support (24K, 22K, 21K, 18K).
 All prices are base on 24K (pure gold) and derived for other purities.
+Supports configurable premium multiplier for Oman retail/local rates.
 """
 
 import requests
 import json
+import os
 from datetime import datetime
 from typing import Dict, Optional
 
 class GoldPriceAPI:
-    """Fetch live gold prices accurate to Oman market."""
+    """Fetch live gold prices with Oman retail premium support."""
     
     # Data sources
-    METALS_LIVE_API = "https://api.metals.live/v1/spot/gold"  # Returns USD per gram
+    METALS_LIVE_API = "https://api.metals.live/v1/spot/gold"
     CURRENCY_CONVERT_URL = "https://api.exchangerate-api.com/v4/latest/USD"
+    
+    # Premium multiplier for Oman retail prices (configurable)
+    # Default: 2.14 (approximately 54 OMR/gram from 25.29 global spot)
+    # Set via environment: GOLD_PRICE_PREMIUM_MULTIPLIER
+    DEFAULT_PREMIUM = float(os.getenv("GOLD_PRICE_PREMIUM_MULTIPLIER", "2.14"))
     
     @staticmethod
     def get_gold_price_usd() -> Optional[Dict]:
@@ -87,10 +94,15 @@ class GoldPriceAPI:
         }
     
     @staticmethod
-    def get_gold_price_oman() -> Dict:
+    def get_gold_price_oman(premium_multiplier: Optional[float] = None) -> Dict:
         """
         Get current gold prices in Omani Rial (OMR).
         Returns 24K pure gold as base, with derived purities (22K, 21K, 18K).
+        
+        Args:
+            premium_multiplier: Apply retail/local premium to spot prices.
+                               If None, uses DEFAULT_PREMIUM (set via env var).
+                               Example: 2.14 multiplies spot by 2.14x for Oman retail.
         """
         usd_data = GoldPriceAPI.get_gold_price_usd()
         
@@ -106,17 +118,30 @@ class GoldPriceAPI:
         price_usd_gram = usd_data["price_usd_per_gram"]
         price_omr_gram_24k = price_usd_gram * omr_rate
         
+        # Apply premium multiplier if provided
+        if premium_multiplier is None:
+            premium_multiplier = GoldPriceAPI.DEFAULT_PREMIUM
+        
+        if premium_multiplier != 1.0:
+            price_omr_gram_24k_retail = price_omr_gram_24k * premium_multiplier
+            price_type = "Oman Retail"
+        else:
+            price_omr_gram_24k_retail = price_omr_gram_24k
+            price_type = "Global Spot"
+        
         # Convert to per ounce
         GRAMS_PER_OUNCE = 31.1035
-        price_omr_oz_24k = price_omr_gram_24k * GRAMS_PER_OUNCE
+        price_omr_oz_24k_retail = price_omr_gram_24k_retail * GRAMS_PER_OUNCE
         
         # Calculate prices for different purities
-        purity_prices_gram = GoldPriceAPI.calculate_purity_prices(price_omr_gram_24k)
-        purity_prices_oz = GoldPriceAPI.calculate_purity_prices(price_omr_oz_24k)
+        purity_prices_gram = GoldPriceAPI.calculate_purity_prices(price_omr_gram_24k_retail)
+        purity_prices_oz = GoldPriceAPI.calculate_purity_prices(price_omr_oz_24k_retail)
         
         return {
             "currency": "OMR",
+            "price_type": price_type,
             "purity_base": "24K (pure gold)",
+            "premium_multiplier": premium_multiplier,
             "timestamp": usd_data["timestamp"],
             "source": usd_data.get("source", "unknown"),
             "usd_to_omr_rate": omr_rate,
@@ -131,16 +156,18 @@ class GoldPriceAPI:
             "per_oz_unit": "OMR/troy ounce",
             
             # Legacy fields for backward compatibility
-            "price_per_gram": price_omr_gram_24k,  # 24K
-            "price_per_ounce": price_omr_oz_24k,  # 24K
+            "price_per_gram": price_omr_gram_24k_retail,  # 24K
+            "price_per_ounce": price_omr_oz_24k_retail,  # 24K
             
             # Metadata
             "metadata": {
                 "note": "All prices in 24K pure gold. Use per_gram/per_oz for purity-specific prices.",
+                "price_type_note": f"Premium multiplier {premium_multiplier}x applied to spot price.",
                 "conversions": {
                     "grams_per_troy_ounce": GRAMS_PER_OUNCE,
-                    "usd_per_gram": price_usd_gram,
-                    "usd_per_oz": usd_data.get("price_usd_per_oz", price_usd_gram * GRAMS_PER_OUNCE)
+                    "usd_per_gram_spot": price_usd_gram,
+                    "usd_per_oz_spot": usd_data.get("price_usd_per_oz", price_usd_gram * GRAMS_PER_OUNCE),
+                    "omr_per_gram_spot": round(price_omr_gram_24k, 3)
                 }
             }
         }

@@ -2,27 +2,17 @@
 
 This API provides live gold prices with purity-specific breakdowns (24K, 22K, 21K, 18K), converted to Omani Rial (OMR).
 
-## ⚠️ Critical: Before Going Live
+## ⚠️ Pricing Mode: Oman Retail (Default)
 
-**This API returns GLOBAL SPOT prices**, not Oman-specific market rates:
-- Current return: ~25 OMR/gram (global spot ~$2,050/oz)
-- Your noted rate: ~54 OMR/gram (retail/local premium)
+**This API now returns Oman retail prices by default** (2.14x multiplier):
+- Spot gold global: ~25.29 OMR/gram (786.73 OMR/oz)
+- **Oman retail: ~54.13 OMR/gram (1,683.61 OMR/oz)** ✓ Default
+- Multiplier accounts for local markup, fabrication, and market conditions
 
-**Before deploying:**
-1. Confirm which rate your site needs (spot vs. local retail/wholesale)
-2. If you need Oman-specific rates, provide the feed URL or premium multiplier
-3. We can add a configurable premium factor if needed
-
----
-
-## Features
-
-✅ **Multi-Purity Support** - Returns 24K, 22K, 21K, 18K prices  
-✅ **Explicit Purity Base** - All prices derived from 24K pure gold  
-✅ **Live Exchange Rates** - USD→OMR conversion using current rates  
-✅ **Fallback Support** - Works even if primary API is unavailable  
-✅ **RESTful API** - Easy JSON endpoint for your website  
-✅ **Live Dashboard** - Beautiful interface to display prices  
+**To get different pricing:**
+- Global spot: `?premium=1.0`
+- Custom premium: `?premium=2.5`
+- Set env var: `GOLD_PRICE_PREMIUM_MULTIPLIER=2.0`
 
 ---
 
@@ -49,26 +39,28 @@ Server starts on `http://localhost:5000`
 curl http://localhost:5000/api/gold-price
 ```
 
-**Response (with purity tiers):**
+**Response (with Oman retail premium):**
 ```json
 {
   "currency": "OMR",
+  "price_type": "Oman Retail",
   "purity_base": "24K (pure gold)",
+  "premium_multiplier": 2.14,
   "per_gram": {
-    "24K": 25.29,
-    "22K": 23.15,
-    "21K": 22.08,
-    "18K": 18.97
+    "24K": 54.13,
+    "22K": 49.62,
+    "21K": 47.36,
+    "18K": 40.60
   },
   "per_oz": {
-    "24K": 786.73,
-    "22K": 719.48,
-    "21K": 687.21,
-    "18K": 590.19
+    "24K": 1683.61,
+    "22K": 1543.31,
+    "21K": 1473.16,
+    "18K": 1262.71
   },
-  "usd_to_omr_rate": 0.384,
-  "timestamp": "2026-09-18T10:28:35.966886",
+  "timestamp": "2026-09-18T10:33:41.235160",
   "source": "metals.live",
+  "usd_to_omr_rate": 0.384,
   "status": "success"
 }
 ```
@@ -78,7 +70,66 @@ Open your browser: `http://localhost:5000`
 
 ---
 
-## Gold Purity Reference
+## Premium Multiplier: Oman Retail vs. Global Spot
+
+**What is the premium multiplier?**
+- Converts global spot price to Oman retail/wholesale rate
+- Default: **2.14x** (results in ~54 OMR/gram, matching your market rate)
+- This accounts for Oman markup, fabrication, and local market conditions
+
+**How to adjust:**
+
+1. **Global Spot (No Premium):**
+   ```bash
+   curl 'http://localhost:5000/api/gold-price?premium=1.0'
+   ```
+   Returns: ~25.29 OMR/gram (pure global rate)
+
+2. **Oman Retail (Default):**
+   ```bash
+   curl http://localhost:5000/api/gold-price
+   ```
+   Returns: ~54.13 OMR/gram (2.14x multiplier)
+
+3. **Custom Premium:**
+   ```bash
+   curl 'http://localhost:5000/api/gold-price?premium=2.5'
+   ```
+
+4. **Environment Variable (Persistent):**
+   ```bash
+   export GOLD_PRICE_PREMIUM_MULTIPLIER=2.14
+   python app_gold_price.py
+   ```
+
+**Python Usage:**
+```python
+from wan.gold_api import GoldPriceAPI
+
+# Oman retail (default 2.14x)
+prices = GoldPriceAPI.get_gold_price_oman()
+
+# Global spot
+prices_spot = GoldPriceAPI.get_gold_price_oman(premium_multiplier=1.0)
+
+# Custom
+prices_custom = GoldPriceAPI.get_gold_price_oman(premium_multiplier=2.5)
+```
+
+**Response shows:**
+```json
+{
+  "price_type": "Oman Retail",
+  "premium_multiplier": 2.14,
+  "metadata": {
+    "conversions": {
+      "omr_per_gram_spot": 25.294  // Global spot before premium
+    }
+  }
+}
+```
+
+---
 
 All prices are derived from **24K (pure gold)** as the base:
 

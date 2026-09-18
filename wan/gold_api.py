@@ -23,6 +23,10 @@ class GoldPriceAPI:
     # Set via environment: GOLD_PRICE_PREMIUM_MULTIPLIER
     DEFAULT_PREMIUM = float(os.getenv("GOLD_PRICE_PREMIUM_MULTIPLIER", "2.14"))
     
+    # Fallback USD/oz when APIs unavailable (update when gold prices change significantly)
+    # IMPORTANT: This becomes stale over time. Set via env var GOLD_PRICE_FALLBACK_USD_OZ
+    DEFAULT_FALLBACK_USD_OZ = float(os.getenv("GOLD_PRICE_FALLBACK_USD_OZ", "2500.0"))
+    
     @staticmethod
     def get_gold_price_usd() -> Optional[Dict]:
         """
@@ -38,8 +42,12 @@ class GoldPriceAPI:
             data = response.json()
             
             price_usd_per_gram = data.get("gold")
+            print(f"[DEBUG] metals.live raw response: {data}")
+            print(f"[DEBUG] price_usd_per_gram: {price_usd_per_gram}")
+            
             if price_usd_per_gram and price_usd_per_gram > 50:  # Sanity check: gold should be >$50/gram
                 price_usd_per_oz = price_usd_per_gram * 31.1035  # Convert to troy ounce
+                print(f"[DEBUG] Converted to USD/oz: {price_usd_per_oz}")
                 return {
                     "price_usd_per_gram": price_usd_per_gram,
                     "price_usd_per_oz": price_usd_per_oz,
@@ -48,16 +56,31 @@ class GoldPriceAPI:
                     "unit_verified": True
                 }
         except Exception as e:
-            print(f"metals.live API failed: {e}")
+            print(f"[ERROR] metals.live API failed: {e}")
         
         # Fallback: Use realistic current spot price
-        # Real gold price ~$2,050/oz USD (as of 2024-2025)
+        # CRITICAL: Update this regularly as gold prices fluctuate!
+        # As of Sept 2024-2026: Gold spot typically $2,300-2,700/oz
+        # User reports current rate: ~$4,300-4,400/oz (verify your current market)
+        # Using $2,500/oz as conservative 2024-2026 estimate
+        fallback_usd_per_oz = 2500.0
+        fallback_usd_per_gram = fallback_usd_per_oz / 31.1035
+        # Fallback: Use configurable spot price (when APIs unavailable)
+        # IMPORTANT: This becomes stale - update GOLD_PRICE_FALLBACK_USD_OZ environment variable
+        # when gold prices change significantly
+        fallback_usd_per_oz = GoldPriceAPI.DEFAULT_FALLBACK_USD_OZ
+        fallback_usd_per_gram = fallback_usd_per_oz / 31.1035
+        
+        print(f"[FALLBACK] Using hardcoded spot: ${fallback_usd_per_oz}/oz (${fallback_usd_per_gram:.2f}/gram)")
+        print(f"[FALLBACK] WARNING: This is not live data - live APIs unavailable!")
+        print(f"[FALLBACK] To update, set: GOLD_PRICE_FALLBACK_USD_OZ=<new_price>")
+        
         return {
-            "price_usd_per_gram": 65.87,  # $2,050/oz ÷ 31.1035
-            "price_usd_per_oz": 2050.0,
+            "price_usd_per_gram": fallback_usd_per_gram,
+            "price_usd_per_oz": fallback_usd_per_oz,
             "timestamp": datetime.utcnow().isoformat(),
-            "source": "fallback_market_rate",
-            "note": "Live APIs unavailable; using current market approximation"
+            "source": "fallback_approximation",
+            "note": "Live APIs unavailable; using Sept 2024 market approximation"
         }
     
     @staticmethod

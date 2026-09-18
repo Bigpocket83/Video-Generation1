@@ -191,16 +191,32 @@ def index():
                         loading.style.display = 'none';
                         
                         if (data.status === 'success') {
+                            // Extract 24K (pure gold) price
+                            let price24kGram = data.per_gram['24K'];
+                            let price24kOz = data.per_oz['24K'];
+                            
                             document.getElementById('priceGram').textContent = 
-                                data.price_per_gram + ' OMR';
+                                price24kGram + ' OMR (24K Pure)';
                             document.getElementById('priceOunce').textContent = 
-                                data.price_per_ounce + ' OMR';
-                            document.getElementById('currency').textContent = 
-                                data.currency;
+                                price24kOz + ' OMR (24K Pure)';
+                            
+                            // Show all purities
+                            let purityHtml = '<div style="margin-top:15px; background:#e8f4f8; padding:10px; border-radius:5px;">';
+                            purityHtml += '<strong>Purity Breakdown (per gram):</strong><br>';
+                            purityHtml += '24K (Pure): ' + data.per_gram['24K'] + ' OMR<br>';
+                            purityHtml += '22K (91.67%): ' + data.per_gram['22K'] + ' OMR<br>';
+                            purityHtml += '21K (87.5%): ' + data.per_gram['21K'] + ' OMR<br>';
+                            purityHtml += '18K (75%): ' + data.per_gram['18K'] + ' OMR<br>';
+                            purityHtml += '</div>';
+                            
+                            document.getElementById('currency').innerHTML = 
+                                data.currency + purityHtml;
+                            
                             document.getElementById('rate').textContent = 
                                 data.usd_to_omr_rate.toFixed(3);
                             document.getElementById('timestamp').textContent = 
-                                'Last updated: ' + new Date(data.timestamp).toLocaleString();
+                                'Last updated: ' + new Date(data.timestamp).toLocaleString() +
+                                ' | Source: ' + data.source;
                             display.style.display = 'block';
                         } else {
                             showError(data.error || 'Failed to fetch gold price');
